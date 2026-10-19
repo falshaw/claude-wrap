@@ -1,0 +1,12 @@
+{
+  "taskFile": "TASKS.md",
+  "doneArchive": "TASKS-DONE.md",
+  "doneKeep": 25,
+  "handoffDir": ".claude/handoffs",
+  "memoryIndexMax": 180,
+  "scratchDirs": "tmp;.scratch",
+  "backupCmd": "bash scripts/backup-rsync.sh",
+  "backupStatus": ".claude/backup-status.json",
+  "backupTargets": "/home/you/project=>/mnt/backup/project",
+  "backupMaxAgeMin": 30
+}

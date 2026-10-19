@@ -1,0 +1,12 @@
+# Runtime state written by the examples
+.claude/backup-status.json
+.claude/backup-status.json.tmp
+.claude/.last-auto-backup
+.claude/auto-backup.log
+*.tmp
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

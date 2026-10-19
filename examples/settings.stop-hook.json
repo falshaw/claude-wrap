@@ -1,0 +1,20 @@
+{
+  "env": {
+    "WRAP_BACKUP_CMD": "bash scripts/backup-rsync.sh",
+    "BACKUP_PAIRS": "/home/you/project=>/mnt/backup/project",
+    "WRAP_BACKUP_STATUS": ".claude/backup-status.json"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-backup-on-stop.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
