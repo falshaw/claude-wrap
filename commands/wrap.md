@@ -1,5 +1,5 @@
 ---
-description: 'End-of-session workflow: summarize, update the task file, save learnings to memory, clean up, optional git commit, run and VERIFY a backup, write a handoff note. Use when the user says "wrap", "wrap quick", "wrap commit", or ends a work session.'
+description: 'End-of-session workflow: summarize, update the task file, save learnings to memory, clean up, optional git commit, write a handoff note, then run and VERIFY a backup. Use when the user says "wrap", "wrap quick", "wrap commit", or ends a work session.'
 argument-hint: '[quick|commit]'
 ---
 
@@ -35,7 +35,7 @@ The word after `/wrap` selects the variant (the harness passes it as the command
 
 | Command        | Steps run                                   | Backup                              |
 | -------------- | ------------------------------------------- | ----------------------------------- |
-| `/wrap`        | 1 Summary · 2 Tasks · 3 Memory · 4 Cleanup · 6 Backup · 7 Handoff | Run + verify (if configured) |
+| `/wrap`        | 1 Summary · 2 Tasks · 3 Memory · 4 Cleanup · 6 Handoff · 7 Backup | Run + verify (if configured), last |
 | `/wrap quick`  | 1 Summary · 3 Memory                        | Skipped                             |
 | `/wrap commit` | Full `/wrap` plus step 5 Git commit         | Run + verify (if configured)        |
 
@@ -55,20 +55,20 @@ Read settings in this order; the first value found wins:
 | `WRAP_TASK_FILE`        | `TASKS.md`                               | Task list to update in step 2                                 |
 | `WRAP_DONE_ARCHIVE`     | *(unset)*                                | Optional file that receives completed rows when the task file grows past `WRAP_DONE_KEEP` |
 | `WRAP_DONE_KEEP`        | `25`                                     | Completed rows kept in the task file                          |
-| `WRAP_HANDOFF_DIR`      | `.claude/handoffs`                       | Where step 7 writes `YYYY-MM-DD-HHMM.md`                      |
+| `WRAP_HANDOFF_DIR`      | `.claude/handoffs`                       | Where step 6 writes `YYYY-MM-DD-HHMM.md`                      |
 | `WRAP_MEMORY_DIR`       | the project's Claude Code memory dir     | `~/.claude/projects/<project-slug>/memory/`                   |
 | `WRAP_MEMORY_INDEX_MAX` | `180`                                    | Max lines in `MEMORY.md` (Claude Code loads only the start of it) |
 | `WRAP_SCRATCH_DIRS`     | `tmp;.scratch`                           | Folders (relative to project root) that cleanup may empty     |
 | `WRAP_BACKUP_CMD`       | *(unset = backup step skipped)*          | Command that runs the user's backup, e.g. `bash scripts/backup.sh` |
 | `WRAP_BACKUP_STATUS`    | *(unset)*                                | JSON status file the backup writes (format below)             |
 | `WRAP_BACKUP_TARGETS`   | *(unset)*                                | `;`-separated `source=>target` pairs to verify directly       |
-| `WRAP_BACKUP_MAX_AGE_MIN` | `30`                                   | A target's newest file must be younger than this              |
+| `WRAP_BACKUP_MAX_AGE_MIN` | `30`                                   | The status file's `lastRun` must be younger than this         |
 
 ---
 
 ## Step 1: SUMMARIZE
 
-Show this (on screen, not saved yet; step 7 saves it):
+Show this (on screen, not saved yet; step 6 saves it):
 
 ```
 SESSION SUMMARY - [YYYY-MM-DD]
@@ -202,11 +202,47 @@ Skip this step entirely when the project is not a git repository (`git rev-parse
 
 ---
 
-## Step 6: BACKUP AND VERIFY (skipped for `/wrap quick`)
+## Step 6: HANDOFF
+
+Write the handoff note to `WRAP_HANDOFF_DIR/YYYY-MM-DD-HHMM.md` (create the folder if needed; write atomically):
+
+```markdown
+# Handoff — YYYY-MM-DD HH:MM
+
+## Where we left off
+[state of the work in 2-5 lines: what is finished, what is half-done and in which file]
+
+## Next step
+[the one concrete action to take first next session, with file paths or commands]
+
+## Open questions / blockers
+[anything waiting on the user or on someone else]
+
+## Session summary
+[the step 1 block]
+
+## Verification
+Tasks: [file, bytes, items marked done]
+Memory: [files written/updated/deleted, index line count]
+Backup: [runs after this note (step 7); its per-target result goes in the final report]
+Git: [branch + commit hash, "not a repo", or "not requested"]
+```
+
+Then ask:
+
+> "Anything else to remember before this session ends?"
+
+If the user adds something, save it per step 3 and append it to the handoff note.
+
+---
+
+## Step 7: BACKUP AND VERIFY (skipped for `/wrap quick`)
+
+This step runs last, so the task file, memory and handoff note written above are part of the backup.
 
 If `WRAP_BACKUP_CMD` is not set, report `Backup: not configured` and move on.
 
-### 6a: Run it
+### 7a: Run it
 
 - Run `WRAP_BACKUP_CMD` in the foreground and capture its output and exit code.
 - If the output says another run is already in progress (lock held), do **not** start a second one. Wait for the
@@ -215,7 +251,7 @@ If `WRAP_BACKUP_CMD` is not set, report `Backup: not configured` and move on.
   Report the guard message. Do not re-run it with an override flag unless the user confirms the source is intact and
   the deletion is intended.
 
-### 6b: Verify it landed (do not skip)
+### 7b: Verify it landed (do not skip)
 
 A zero exit code and an `"ok": true` summary prove nothing on their own: a mirror can "succeed" while skipping its
 target, and a summary flag can be true while half the targets were not written. Check each target separately.
@@ -228,14 +264,17 @@ target, and a summary flag can be true while half the targets were not written. 
   "targets": {
     "project": { "ok": true, "rc": 1, "detail": "mirror rc=1",
                  "newestFile": "notes/plan.md", "newestMtime": "2026-01-31T18:03:58Z",
-                 "newestSize": 4812, "fileCount": 1534 }
+                 "newestSize": 4812, "sourceNewestMtime": "2026-01-31T18:03:58Z", "fileCount": 1534 }
   }
 }
 ```
 
-- `lastRun` is from this session (minutes old, not hours or days).
+- `lastRun` is younger than `WRAP_BACKUP_MAX_AGE_MIN`. This is the only "ran recently" check: mirrors keep the
+  source's mtimes, so a target whose files were not edited lately is still a good backup.
 - Every target has `ok: true` and a `detail` that does not contain `skip`, `abort` or `error`.
-- Every target has a `newestMtime` younger than `WRAP_BACKUP_MAX_AGE_MIN` and a `newestSize` greater than 0.
+- Every target has a `newestSize` greater than 0, and its `newestMtime` is not older than its `sourceNewestMtime`
+  minus a small tolerance (2 minutes covers coarse timestamps on FAT/exFAT and network shares). An older target
+  newest file means recent source changes did not land.
 - A target that is missing from the file counts as failed.
 
 **Directly on the targets** (if `WRAP_BACKUP_TARGETS` is set, and always when there is no status file) — for each
@@ -267,43 +306,10 @@ Get-ChildItem $src -Recurse -File | Where-Object FullName -notmatch '\\\.git\\' 
   }
 ```
 
-Pass conditions, all must hold: fresh `lastRun`, every target present and fresh, every spot-checked file `OK`.
+Pass conditions, all must hold: fresh `lastRun`, every target present, every target's newest file not older than
+its source's newest file minus the tolerance, every spot-checked file `OK`.
 Any `MISSING`, `SIZE`, stale or absent target is a failed backup: report which target and why. Do not delete
 anything on the target to "fix" it, and do not re-run with override flags on your own.
-
----
-
-## Step 7: HANDOFF
-
-Write the handoff note to `WRAP_HANDOFF_DIR/YYYY-MM-DD-HHMM.md` (create the folder if needed; write atomically):
-
-```markdown
-# Handoff — YYYY-MM-DD HH:MM
-
-## Where we left off
-[state of the work in 2-5 lines: what is finished, what is half-done and in which file]
-
-## Next step
-[the one concrete action to take first next session, with file paths or commands]
-
-## Open questions / blockers
-[anything waiting on the user or on someone else]
-
-## Session summary
-[the step 1 block]
-
-## Verification
-Tasks: [file, bytes, items marked done]
-Memory: [files written/updated/deleted, index line count]
-Backup: [per-target result, or "not configured" / "skipped (quick)"]
-Git: [branch + commit hash, "not a repo", or "not requested"]
-```
-
-Then ask:
-
-> "Anything else to remember before this session ends?"
-
-If the user adds something, save it per step 3 and append it to the handoff note.
 
 ---
 
@@ -316,7 +322,7 @@ End with a compact block. Report the backup per target, never as a bare "backup 
 Updated: TASKS.md (3 done, 2 added; 6,214 B, anchor OK)
 Memory:  wrote feedback-run-tests-before-commit.md; MEMORY.md 74 lines
 Cleanup: removed 4 scratch files in tmp/
-Backup:  project mirror rc=1, newest 2 min old, 5/5 spot checks OK; docs target 5/5 OK
 Git:     not requested
 Handoff: .claude/handoffs/2026-01-31-1810.md
+Backup:  project mirror rc=1, target newest = source newest, 5/5 spot checks OK; docs target 5/5 OK
 ```

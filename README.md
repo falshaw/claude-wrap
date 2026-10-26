@@ -1,8 +1,8 @@
 # claude-wrap
 
 A `/wrap` slash command for [Claude Code](https://docs.claude.com/en/docs/claude-code) that ends a work session
-properly: summary, task file updated, learnings saved to memory, workspace cleaned, backup run **and verified**,
-and a handoff note for the next session.
+properly: summary, task file updated, learnings saved to memory, workspace cleaned, a handoff note for the next
+session, and last a backup run **and verified**.
 
 ## What it does
 
@@ -13,8 +13,8 @@ and a handoff note for the next session.
 | 3 Memory | Writes reusable learnings to Claude Code's memory directory, one fact per file, and keeps the `MEMORY.md` index lean |
 | 4 Cleanup | Removes scratch files and temp scripts the session created, nothing else |
 | 5 Git (`/wrap commit`) | Reviews the diff, commits by explicit path on a branch; never pushes without asking |
-| 6 Backup | Runs your backup script, then checks every target on disk |
-| 7 Handoff | Writes `where we left off` + `next step` to a dated note |
+| 6 Handoff | Writes `where we left off` + `next step` to a dated note |
+| 7 Backup | Runs your backup script last, then checks every target on disk |
 
 | Command        | Runs |
 | -------------- | ---- |
@@ -25,9 +25,10 @@ and a handoff note for the next session.
 ## Why it is different
 
 - **Verified backup, not a green exit code.** A mirror can exit 0 while skipping a target, and an `"ok": true`
-  summary can sit on top of half-written targets. `/wrap` checks each target separately: the status file must be
-  fresh, every target must have a recent newest file with a non-zero size, and the newest files from the source must
-  exist on the target with the same size. Anything else is reported as a failed backup.
+  summary can sit on top of half-written targets. `/wrap` checks each target separately: the status file's `lastRun`
+  must be recent, every target's newest file must have a non-zero size and must not be older than the source's newest
+  file (mirrors keep source mtimes, so file age alone says nothing), and the newest files from the source must exist
+  on the target with the same size. Anything else is reported as a failed backup.
 - **Atomic writes.** Files are rewritten via `file.tmp` + rename, never by truncating the original and then building
   content. A crash mid-write leaves the old file intact.
 - **Rewrite checks.** After rewriting a file, `/wrap` prints its byte count and confirms an anchor string survived,
@@ -59,11 +60,22 @@ Both example scripts take a lock so two runs never overlap, abort a target when 
 500 files (unmounted or damaged source), spot-check the newest files on each target, and write the status JSON
 atomically.
 
+- `node_modules`, `.venv`, `__pycache__`, `dist`, `build` and `*.tmp` are never backed up.
+- Each source folder name must be unique across `BACKUP_PAIRS` (it is the key in the status file); the scripts stop
+  with exit code 2 on a duplicate.
+
 ### Optional: Stop hook
 
 `examples/auto-backup-on-stop.sh` runs the backup in the background at most once an hour when Claude stops a turn.
 Copy it to `.claude/hooks/` and merge `examples/settings.stop-hook.json` into `.claude/settings.json`. `/wrap` still
 runs and verifies a fresh backup at the end of the session; the hook only narrows the gap between wraps.
+
+The hook is a bash script, so it needs bash on the PATH (on Windows: Git Bash). On Windows, point it at the
+PowerShell backup:
+
+```bash
+WRAP_BACKUP_CMD="pwsh -File scripts/backup-robocopy.ps1"
+```
 
 ## Configuration
 
@@ -81,7 +93,7 @@ Environment variables win over `.claude/wrap.json` (see `examples/wrap.json`), w
 | `WRAP_BACKUP_CMD` | unset (step skipped) | Your backup command |
 | `WRAP_BACKUP_STATUS` | unset | JSON status file the backup writes |
 | `WRAP_BACKUP_TARGETS` | unset | `source=>target;...` pairs to spot-check directly |
-| `WRAP_BACKUP_MAX_AGE_MIN` | `30` | Max age of a target's newest file |
+| `WRAP_BACKUP_MAX_AGE_MIN` | `30` | Max age of the status file's `lastRun` |
 
 ### Status file format
 
@@ -93,7 +105,7 @@ Any backup tool works as long as it writes this (or you set `WRAP_BACKUP_TARGETS
   "targets": {
     "project": { "ok": true, "rc": 1, "detail": "mirror rc=1, 5/5 spot checks OK",
                  "newestFile": "notes/plan.md", "newestMtime": "2026-01-31T18:03:58Z",
-                 "newestSize": 4812, "fileCount": 1534 }
+                 "newestSize": 4812, "sourceNewestMtime": "2026-01-31T18:03:58Z", "fileCount": 1534 }
   }
 }
 ```
