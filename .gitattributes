@@ -1,0 +1,10 @@
+# Normalise text files to LF in the repository and the working tree on every OS,
+# so the shell scripts run in Git Bash, Linux and macOS alike.
+* text=auto eol=lf
+*.sh text eol=lf
+
+# Binary files: never touch line endings
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
